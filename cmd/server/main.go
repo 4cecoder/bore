@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -20,6 +21,54 @@ var (
 	bytesTransferred  int64
 	activeConnections int64
 )
+
+type ConnectionPool struct {
+	targetAddr string
+	pool       chan net.Conn
+	mu         sync.Mutex
+	maxSize    int
+}
+
+func NewConnectionPool(targetAddr string, maxSize int) *ConnectionPool {
+	return &ConnectionPool{
+		targetAddr: targetAddr,
+		pool:       make(chan net.Conn, maxSize),
+		maxSize:    maxSize,
+	}
+}
+
+func (cp *ConnectionPool) Get() (net.Conn, error) {
+	select {
+	case conn := <-cp.pool:
+		// Test if connection is still alive
+		conn.SetReadDeadline(time.Now().Add(1 * time.Millisecond))
+		var buf [1]byte
+		if _, err := conn.Read(buf[:]); err == nil {
+			conn.SetReadDeadline(time.Time{})
+			return conn, nil
+		}
+		conn.Close()
+		// Fall through to create new connection
+	default:
+	}
+
+	// Create new connection
+	conn, err := net.Dial("tcp", cp.targetAddr)
+	if err != nil {
+		return nil, err
+	}
+	return conn, nil
+}
+
+func (cp *ConnectionPool) Put(conn net.Conn) {
+	select {
+	case cp.pool <- conn:
+		// Successfully returned to pool
+	default:
+		// Pool is full, close connection
+		conn.Close()
+	}
+}
 
 func main() {
 	var listenPort = flag.Int("port", 8080, "Port to listen on")
@@ -33,6 +82,9 @@ func main() {
 	}
 
 	fmt.Printf("Starting bore server on port %d\n", *listenPort)
+
+	// Initialize connection pool
+	pool := NewConnectionPool(*targetAddr, 10) // Pool size of 10
 
 	// Start metrics logging
 	go func() {
@@ -85,7 +137,7 @@ func main() {
 			log.Println("Error accepting connection:", err)
 			continue
 		}
-		go handleConnection(conn, *targetAddr, *expectedApiKey)
+		go handleConnection(conn, pool, *expectedApiKey)
 	}
 }
 
@@ -130,7 +182,7 @@ func structuredLog(level, message string, fields map[string]interface{}) {
 	}
 }
 
-func handleConnection(conn net.Conn, targetAddr string, expectedApiKey string) {
+func handleConnection(conn net.Conn, pool *ConnectionPool, expectedApiKey string) {
 	defer conn.Close()
 	atomic.AddInt64(&activeConnections, 1)
 	atomic.AddInt64(&connectionsTotal, 1)
@@ -154,22 +206,22 @@ func handleConnection(conn net.Conn, targetAddr string, expectedApiKey string) {
 		return
 	}
 
-	// Connect to target
-	targetConn, err := net.Dial("tcp", targetAddr)
+	// Get connection from pool
+	targetConn, err := pool.Get()
 	if err != nil {
-		structuredLog("ERROR", "Failed to connect to target", map[string]interface{}{
+		structuredLog("ERROR", "Failed to get connection from pool", map[string]interface{}{
 			"client_ip": conn.RemoteAddr().String(),
-			"target":    targetAddr,
+			"target":    pool.targetAddr,
 			"event":     "connection_failed",
 			"error":     err.Error(),
 		})
 		return
 	}
-	defer targetConn.Close()
+	defer pool.Put(targetConn)
 
 	structuredLog("INFO", "Starting tunnel", map[string]interface{}{
 		"client_ip": conn.RemoteAddr().String(),
-		"target":    targetAddr,
+		"target":    pool.targetAddr,
 		"event":     "tunnel_started",
 	})
 
