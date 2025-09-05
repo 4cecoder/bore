@@ -1,0 +1,78 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.25'
+
+    - name: Run tests
+      run: go test ./...
+
+    - name: Create release archives
+      run: |
+        # Create bin directory if it doesn't exist
+        mkdir -p bin
+
+        # Build for multiple platforms
+        GOOS=linux GOARCH=amd64 go build -o bin/bore-server-linux-amd64 ./cmd/server
+        GOOS=linux GOARCH=arm64 go build -o bin/bore-server-linux-arm64 ./cmd/server
+        GOOS=darwin GOARCH=amd64 go build -o bin/bore-server-darwin-amd64 ./cmd/server
+        GOOS=darwin GOARCH=arm64 go build -o bin/bore-server-darwin-arm64 ./cmd/server
+        GOOS=windows GOARCH=amd64 go build -o bin/bore-server-windows-amd64.exe ./cmd/server
+        GOOS=windows GOARCH=arm64 go build -o bin/bore-server-windows-arm64.exe ./cmd/server
+
+        GOOS=linux GOARCH=amd64 go build -o bin/bore-client-linux-amd64 ./cmd/client
+        GOOS=linux GOARCH=arm64 go build -o bin/bore-client-linux-arm64 ./cmd/client
+        GOOS=darwin GOARCH=amd64 go build -o bin/bore-client-darwin-amd64 ./cmd/client
+        GOOS=darwin GOARCH=arm64 go build -o bin/bore-client-darwin-arm64 ./cmd/client
+        GOOS=windows GOARCH=amd64 go build -o bin/bore-client-windows-amd64.exe ./cmd/client
+        GOOS=windows GOARCH=arm64 go build -o bin/bore-client-windows-arm64.exe ./cmd/client
+
+        # Create archives
+        cd bin
+        tar -czf bore-server-linux-amd64.tar.gz bore-server-linux-amd64
+        tar -czf bore-server-linux-arm64.tar.gz bore-server-linux-arm64
+        tar -czf bore-server-darwin-amd64.tar.gz bore-server-darwin-amd64
+        tar -czf bore-server-darwin-arm64.tar.gz bore-server-darwin-arm64
+        zip bore-server-windows-amd64.zip bore-server-windows-amd64.exe
+        zip bore-server-windows-arm64.zip bore-server-windows-arm64.exe
+
+        tar -czf bore-client-linux-amd64.tar.gz bore-client-linux-amd64
+        tar -czf bore-client-linux-arm64.tar.gz bore-client-linux-arm64
+        tar -czf bore-client-darwin-amd64.tar.gz bore-client-darwin-amd64
+        tar -czf bore-client-darwin-arm64.tar.gz bore-client-darwin-arm64
+        zip bore-client-windows-amd64.zip bore-client-windows-amd64.exe
+        zip bore-client-windows-arm64.zip bore-client-windows-arm64.exe
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          bin/bore-server-linux-amd64.tar.gz
+          bin/bore-server-linux-arm64.tar.gz
+          bin/bore-server-darwin-amd64.tar.gz
+          bin/bore-server-darwin-arm64.tar.gz
+          bin/bore-server-windows-amd64.zip
+          bin/bore-server-windows-arm64.zip
+          bin/bore-client-linux-amd64.tar.gz
+          bin/bore-client-linux-arm64.tar.gz
+          bin/bore-client-darwin-amd64.tar.gz
+          bin/bore-client-darwin-arm64.tar.gz
+          bin/bore-client-windows-amd64.zip
+          bin/bore-client-windows-arm64.zip
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

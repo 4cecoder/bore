@@ -1,0 +1,40 @@
+# Development Environment Configuration
+server:
+  port: 8080
+  tls_port: 8443
+  host: "0.0.0.0"
+  read_timeout: 30
+  write_timeout: 30
+
+tls:
+  cert_file: "certs/cert.pem"
+  key_file: "certs/key.pem"
+  min_version: "1.2"
+
+authentication:
+  api_key: "dev-api-key-12345"
+  enable_auth: true
+
+logging:
+  level: "debug"
+  format: "json"
+  output: "stdout"
+
+metrics:
+  enabled: true
+  port: 9090
+  path: "/metrics"
+
+connection_pool:
+  max_connections: 100
+  max_idle_connections: 10
+  idle_timeout: 300
+
+load_balancer:
+  targets:
+    - "localhost:8080"
+  algorithm: "round_robin"
+
+monitoring:
+  health_check_interval: 30
+  enable_prometheus: true

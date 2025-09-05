@@ -1,0 +1,48 @@
+version: '3.8'
+
+services:
+  bore-server:
+    build:
+      context: .
+      target: server
+    ports:
+      - "8080:8080"    # HTTP port
+      - "8443:8443"    # HTTPS port
+    volumes:
+      - ./certs:/root/certs:ro
+    environment:
+      - SERVER_PORT=8080
+      - TLS_PORT=8443
+      - API_KEY=test-api-key-123
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  bore-client:
+    build:
+      context: .
+      target: client
+    depends_on:
+      bore-server:
+        condition: service_healthy
+    environment:
+      - LOCAL_PORT=3000
+      - SERVER_ADDR=bore-server:8080
+      - API_KEY=test-api-key-123
+    # Example: tunnel a local development server
+    # Uncomment and modify as needed
+    # command: ["./client", "-local-port=3000", "-server=bore-server:8080", "-api-key=test-api-key-123"]
+
+  # Optional: Sample web server for testing
+  test-server:
+    image: nginx:alpine
+    ports:
+      - "3000:80"
+    volumes:
+      - ./test-index.html:/usr/share/nginx/html/index.html:ro
+    depends_on:
+      - bore-client

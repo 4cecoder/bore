@@ -1,0 +1,59 @@
+# Production Environment Configuration
+server:
+  port: 8080
+  tls_port: 8443
+  host: "0.0.0.0"
+  read_timeout: 120
+  write_timeout: 120
+
+tls:
+  cert_file: "/etc/ssl/certs/bore.crt"
+  key_file: "/etc/ssl/private/bore.key"
+  min_version: "1.2"
+
+authentication:
+  api_key: "${API_KEY}"  # Use environment variable
+  enable_auth: true
+
+logging:
+  level: "warn"
+  format: "json"
+  output: "/var/log/bore/server.log"
+
+metrics:
+  enabled: true
+  port: 9090
+  path: "/metrics"
+
+connection_pool:
+  max_connections: 1000
+  max_idle_connections: 100
+  idle_timeout: 900
+
+load_balancer:
+  targets:
+    - "bore-server-1:8080"
+    - "bore-server-2:8080"
+    - "bore-server-3:8080"
+  algorithm: "round_robin"
+
+monitoring:
+  health_check_interval: 30
+  enable_prometheus: true
+
+database:
+  host: "${DB_HOST}"
+  port: 5432
+  name: "bore_prod"
+  user: "${DB_USER}"
+  password: "${DB_PASSWORD}"
+
+security:
+  rate_limit: 1000  # requests per minute
+  max_connections_per_ip: 10
+  enable_cors: false
+
+backup:
+  enabled: true
+  schedule: "0 2 * * *"  # Daily at 2 AM
+  retention_days: 30
