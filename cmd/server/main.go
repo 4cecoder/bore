@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"flag"
 	"fmt"
 	"io"
@@ -19,7 +20,16 @@ func main() {
 
 	fmt.Printf("Starting bore server on port %d\n", *listenPort)
 
-	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", *listenPort))
+	cert, err := tls.LoadX509KeyPair("certs/cert.pem", "certs/key.pem")
+	if err != nil {
+		log.Fatal("Failed to load TLS cert:", err)
+	}
+
+	tlsConfig := &tls.Config{
+		Certificates: []tls.Certificate{cert},
+	}
+
+	listener, err := tls.Listen("tcp", fmt.Sprintf(":%d", *listenPort), tlsConfig)
 	if err != nil {
 		log.Fatal(err)
 	}

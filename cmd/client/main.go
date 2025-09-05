@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"flag"
 	"fmt"
 	"io"
@@ -42,7 +43,7 @@ func handleLocalConnection(localConn net.Conn, serverAddr string) {
 	defer localConn.Close()
 
 	// Connect to server for this connection
-	serverConn, err := net.Dial("tcp", serverAddr)
+	serverConn, err := tls.Dial("tcp", serverAddr, &tls.Config{InsecureSkipVerify: true})
 	if err != nil {
 		log.Println("Failed to connect to server:", err)
 		return
