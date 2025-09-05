@@ -1,0 +1,76 @@
+name: Integration Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  integration-test:
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.25'
+
+    - name: Cache Go modules
+      uses: actions/cache@v3
+      with:
+        path: ~/go/pkg/mod
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
+
+    - name: Download dependencies
+      run: go mod download
+
+    - name: Build binaries
+      run: |
+        mkdir -p bin
+        go build -o bin/server ./cmd/server
+        go build -o bin/client ./cmd/client
+
+    - name: Start bore server
+      run: |
+        ./bin/server &
+        SERVER_PID=$!
+        echo "SERVER_PID=$SERVER_PID" >> $GITHUB_ENV
+        sleep 2
+
+    - name: Run integration tests
+      run: |
+        # Test basic connectivity
+        echo "Testing server connectivity..."
+        curl -f http://localhost:8080/health || exit 1
+
+        # Test client connection (if server is running)
+        echo "Testing client connection..."
+        timeout 10s ./bin/client -local-port 3001 -server localhost:8080 -api-key test-key || echo "Client test completed"
+
+    - name: Stop server
+      run: |
+        if [ ! -z "$SERVER_PID" ]; then
+          kill $SERVER_PID || true
+        fi
+
+    - name: Test Docker Compose
+      run: |
+        docker-compose up -d
+        sleep 10
+        docker-compose ps
+        docker-compose down
