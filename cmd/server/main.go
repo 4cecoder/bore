@@ -23,17 +23,19 @@ var (
 )
 
 type ConnectionPool struct {
-	targetAddr string
-	pool       chan net.Conn
-	mu         sync.Mutex
-	maxSize    int
+	targetAddrs []string
+	pool        chan net.Conn
+	mu          sync.Mutex
+	maxSize     int
+	current     int
 }
 
-func NewConnectionPool(targetAddr string, maxSize int) *ConnectionPool {
+func NewConnectionPool(targetAddrs []string, maxSize int) *ConnectionPool {
 	return &ConnectionPool{
-		targetAddr: targetAddr,
-		pool:       make(chan net.Conn, maxSize),
-		maxSize:    maxSize,
+		targetAddrs: targetAddrs,
+		pool:        make(chan net.Conn, maxSize),
+		maxSize:     maxSize,
+		current:     0,
 	}
 }
 
@@ -52,8 +54,14 @@ func (cp *ConnectionPool) Get() (net.Conn, error) {
 	default:
 	}
 
+	// Select target using round-robin
+	cp.mu.Lock()
+	targetAddr := cp.targetAddrs[cp.current]
+	cp.current = (cp.current + 1) % len(cp.targetAddrs)
+	cp.mu.Unlock()
+
 	// Create new connection
-	conn, err := net.Dial("tcp", cp.targetAddr)
+	conn, err := net.Dial("tcp", targetAddr)
 	if err != nil {
 		return nil, err
 	}
@@ -84,7 +92,11 @@ func main() {
 	fmt.Printf("Starting bore server on port %d\n", *listenPort)
 
 	// Initialize connection pool
-	pool := NewConnectionPool(*targetAddr, 10) // Pool size of 10
+	targetAddrs := strings.Split(*targetAddr, ",")
+	for i := range targetAddrs {
+		targetAddrs[i] = strings.TrimSpace(targetAddrs[i])
+	}
+	pool := NewConnectionPool(targetAddrs, 10) // Pool size of 10
 
 	// Start metrics logging
 	go func() {
@@ -211,7 +223,6 @@ func handleConnection(conn net.Conn, pool *ConnectionPool, expectedApiKey string
 	if err != nil {
 		structuredLog("ERROR", "Failed to get connection from pool", map[string]interface{}{
 			"client_ip": conn.RemoteAddr().String(),
-			"target":    pool.targetAddr,
 			"event":     "connection_failed",
 			"error":     err.Error(),
 		})
@@ -221,7 +232,6 @@ func handleConnection(conn net.Conn, pool *ConnectionPool, expectedApiKey string
 
 	structuredLog("INFO", "Starting tunnel", map[string]interface{}{
 		"client_ip": conn.RemoteAddr().String(),
-		"target":    pool.targetAddr,
 		"event":     "tunnel_started",
 	})
 
