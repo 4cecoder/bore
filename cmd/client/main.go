@@ -12,6 +12,7 @@ import (
 func main() {
 	var localPort = flag.Int("local-port", 8080, "Local port to tunnel")
 	var serverAddr = flag.String("server", "localhost:8080", "Server address")
+	var apiKey = flag.String("api-key", "", "API key for authentication")
 	flag.Parse()
 
 	if *localPort < 1 || *localPort > 65535 {
@@ -35,11 +36,11 @@ func main() {
 			log.Println("Error accepting local connection:", err)
 			continue
 		}
-		go handleLocalConnection(localConn, *serverAddr)
+		go handleLocalConnection(localConn, *serverAddr, *apiKey)
 	}
 }
 
-func handleLocalConnection(localConn net.Conn, serverAddr string) {
+func handleLocalConnection(localConn net.Conn, serverAddr string, apiKey string) {
 	defer localConn.Close()
 
 	// Connect to server for this connection
@@ -49,6 +50,12 @@ func handleLocalConnection(localConn net.Conn, serverAddr string) {
 		return
 	}
 	defer serverConn.Close()
+
+	// Send API key for authentication
+	if _, err := fmt.Fprintf(serverConn, "%s\n", apiKey); err != nil {
+		log.Println("Failed to send API key:", err)
+		return
+	}
 
 	fmt.Println("Tunneling connection from", localConn.RemoteAddr())
 

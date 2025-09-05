@@ -1,17 +1,20 @@
 package main
 
 import (
+	"bufio"
 	"crypto/tls"
 	"flag"
 	"fmt"
 	"io"
 	"log"
 	"net"
+	"strings"
 )
 
 func main() {
 	var listenPort = flag.Int("port", 8080, "Port to listen on")
 	var targetAddr = flag.String("target", "localhost:3000", "Target address to forward to")
+	var expectedApiKey = flag.String("api-key", "default-key", "Expected API key for authentication")
 	flag.Parse()
 
 	if *listenPort < 1 || *listenPort > 65535 {
@@ -41,12 +44,24 @@ func main() {
 			log.Println("Error accepting connection:", err)
 			continue
 		}
-		go handleConnection(conn, *targetAddr)
+		go handleConnection(conn, *targetAddr, *expectedApiKey)
 	}
 }
 
-func handleConnection(conn net.Conn, targetAddr string) {
+func handleConnection(conn net.Conn, targetAddr string, expectedApiKey string) {
 	defer conn.Close()
+
+	// Read API key
+	scanner := bufio.NewScanner(conn)
+	if !scanner.Scan() {
+		log.Println("Failed to read API key")
+		return
+	}
+	apiKey := strings.TrimSpace(scanner.Text())
+	if apiKey != expectedApiKey {
+		log.Println("Invalid API key from", conn.RemoteAddr())
+		return
+	}
 
 	// Connect to target
 	targetConn, err := net.Dial("tcp", targetAddr)
