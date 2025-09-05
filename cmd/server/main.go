@@ -10,7 +10,14 @@ import (
 	"log"
 	"net"
 	"strings"
+	"sync/atomic"
 	"time"
+)
+
+var (
+	connectionsTotal  int64
+	bytesTransferred  int64
+	activeConnections int64
 )
 
 func main() {
@@ -24,6 +31,20 @@ func main() {
 	}
 
 	fmt.Printf("Starting bore server on port %d\n", *listenPort)
+
+	// Start metrics logging
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			structuredLog("INFO", "Metrics update", map[string]interface{}{
+				"event":              "metrics",
+				"connections_total":  atomic.LoadInt64(&connectionsTotal),
+				"active_connections": atomic.LoadInt64(&activeConnections),
+				"bytes_transferred":  atomic.LoadInt64(&bytesTransferred),
+			})
+		}
+	}()
 
 	cert, err := tls.LoadX509KeyPair("certs/cert.pem", "certs/key.pem")
 	if err != nil {
@@ -59,6 +80,14 @@ type LogEntry struct {
 	Event     string `json:"event,omitempty"`
 }
 
+type countingWriter struct {
+	conn net.Conn
+}
+
+func (cw *countingWriter) Write(p []byte) (n int, err error) {
+	return cw.conn.Write(p)
+}
+
 func structuredLog(level, message string, fields map[string]interface{}) {
 	entry := LogEntry{
 		Timestamp: time.Now().Format(time.RFC3339),
@@ -85,6 +114,9 @@ func structuredLog(level, message string, fields map[string]interface{}) {
 
 func handleConnection(conn net.Conn, targetAddr string, expectedApiKey string) {
 	defer conn.Close()
+	atomic.AddInt64(&activeConnections, 1)
+	atomic.AddInt64(&connectionsTotal, 1)
+	defer atomic.AddInt64(&activeConnections, -1)
 
 	// Read API key
 	scanner := bufio.NewScanner(conn)
@@ -123,7 +155,11 @@ func handleConnection(conn net.Conn, targetAddr string, expectedApiKey string) {
 		"event":     "tunnel_started",
 	})
 
-	// Forward data in both directions
-	go io.Copy(targetConn, conn)
-	io.Copy(conn, targetConn)
+	// Forward data in both directions with metrics
+	go func() {
+		bytes, _ := io.Copy(targetConn, conn)
+		atomic.AddInt64(&bytesTransferred, bytes)
+	}()
+	bytes, _ := io.Copy(conn, targetConn)
+	atomic.AddInt64(&bytesTransferred, bytes)
 }
