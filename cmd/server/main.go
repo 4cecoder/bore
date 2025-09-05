@@ -83,6 +83,7 @@ func main() {
 	var targetAddr = flag.String("target", "localhost:3000", "Target address to forward to")
 	var expectedApiKey = flag.String("api-key", "default-key", "Expected API key for authentication")
 	var healthPort = flag.Int("health-port", 8081, "Port for health check endpoint")
+	var maxConnections = flag.Int("max-connections", 100, "Maximum concurrent connections")
 	flag.Parse()
 
 	if *listenPort < 1 || *listenPort > 65535 {
@@ -97,6 +98,9 @@ func main() {
 		targetAddrs[i] = strings.TrimSpace(targetAddrs[i])
 	}
 	pool := NewConnectionPool(targetAddrs, 10) // Pool size of 10
+
+	// Connection limiter
+	connLimiter := make(chan struct{}, *maxConnections)
 
 	// Start metrics logging
 	go func() {
@@ -149,7 +153,13 @@ func main() {
 			log.Println("Error accepting connection:", err)
 			continue
 		}
-		go handleConnection(conn, pool, *expectedApiKey)
+
+		// Acquire connection slot
+		connLimiter <- struct{}{}
+		go func() {
+			defer func() { <-connLimiter }() // Release slot
+			handleConnection(conn, pool, *expectedApiKey)
+		}()
 	}
 }
 
