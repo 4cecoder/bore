@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/http"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -24,6 +25,7 @@ func main() {
 	var listenPort = flag.Int("port", 8080, "Port to listen on")
 	var targetAddr = flag.String("target", "localhost:3000", "Target address to forward to")
 	var expectedApiKey = flag.String("api-key", "default-key", "Expected API key for authentication")
+	var healthPort = flag.Int("health-port", 8081, "Port for health check endpoint")
 	flag.Parse()
 
 	if *listenPort < 1 || *listenPort > 65535 {
@@ -44,6 +46,22 @@ func main() {
 				"bytes_transferred":  atomic.LoadInt64(&bytesTransferred),
 			})
 		}
+	}()
+
+	// Start health check server
+	go func() {
+		http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			health := map[string]interface{}{
+				"status":             "healthy",
+				"timestamp":          time.Now().Format(time.RFC3339),
+				"connections_total":  atomic.LoadInt64(&connectionsTotal),
+				"active_connections": atomic.LoadInt64(&activeConnections),
+				"bytes_transferred":  atomic.LoadInt64(&bytesTransferred),
+			}
+			json.NewEncoder(w).Encode(health)
+		})
+		http.ListenAndServe(fmt.Sprintf(":%d", *healthPort), nil)
 	}()
 
 	cert, err := tls.LoadX509KeyPair("certs/cert.pem", "certs/key.pem")
