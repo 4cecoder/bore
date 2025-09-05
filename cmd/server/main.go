@@ -3,12 +3,14 @@ package main
 import (
 	"bufio"
 	"crypto/tls"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"log"
 	"net"
 	"strings"
+	"time"
 )
 
 func main() {
@@ -48,30 +50,78 @@ func main() {
 	}
 }
 
+type LogEntry struct {
+	Timestamp string `json:"timestamp"`
+	Level     string `json:"level"`
+	Message   string `json:"message"`
+	ClientIP  string `json:"client_ip,omitempty"`
+	Target    string `json:"target,omitempty"`
+	Event     string `json:"event,omitempty"`
+}
+
+func structuredLog(level, message string, fields map[string]interface{}) {
+	entry := LogEntry{
+		Timestamp: time.Now().Format(time.RFC3339),
+		Level:     level,
+		Message:   message,
+	}
+
+	if clientIP, ok := fields["client_ip"].(string); ok {
+		entry.ClientIP = clientIP
+	}
+	if target, ok := fields["target"].(string); ok {
+		entry.Target = target
+	}
+	if event, ok := fields["event"].(string); ok {
+		entry.Event = event
+	}
+
+	if jsonData, err := json.Marshal(entry); err == nil {
+		fmt.Println(string(jsonData))
+	} else {
+		log.Printf("[%s] %s", level, message)
+	}
+}
+
 func handleConnection(conn net.Conn, targetAddr string, expectedApiKey string) {
 	defer conn.Close()
 
 	// Read API key
 	scanner := bufio.NewScanner(conn)
 	if !scanner.Scan() {
-		log.Println("Failed to read API key")
+		structuredLog("ERROR", "Failed to read API key", map[string]interface{}{
+			"client_ip": conn.RemoteAddr().String(),
+			"event":     "auth_failed",
+		})
 		return
 	}
 	apiKey := strings.TrimSpace(scanner.Text())
 	if apiKey != expectedApiKey {
-		log.Println("Invalid API key from", conn.RemoteAddr())
+		structuredLog("WARN", "Invalid API key", map[string]interface{}{
+			"client_ip": conn.RemoteAddr().String(),
+			"event":     "auth_failed",
+		})
 		return
 	}
 
 	// Connect to target
 	targetConn, err := net.Dial("tcp", targetAddr)
 	if err != nil {
-		log.Println("Failed to connect to target:", err)
+		structuredLog("ERROR", "Failed to connect to target", map[string]interface{}{
+			"client_ip": conn.RemoteAddr().String(),
+			"target":    targetAddr,
+			"event":     "connection_failed",
+			"error":     err.Error(),
+		})
 		return
 	}
 	defer targetConn.Close()
 
-	fmt.Println("Forwarding connection from", conn.RemoteAddr(), "to", targetAddr)
+	structuredLog("INFO", "Starting tunnel", map[string]interface{}{
+		"client_ip": conn.RemoteAddr().String(),
+		"target":    targetAddr,
+		"event":     "tunnel_started",
+	})
 
 	// Forward data in both directions
 	go io.Copy(targetConn, conn)

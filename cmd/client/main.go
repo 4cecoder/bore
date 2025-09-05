@@ -2,11 +2,13 @@ package main
 
 import (
 	"crypto/tls"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"log"
 	"net"
+	"time"
 )
 
 func main() {
@@ -40,24 +42,71 @@ func main() {
 	}
 }
 
+type LogEntry struct {
+	Timestamp string `json:"timestamp"`
+	Level     string `json:"level"`
+	Message   string `json:"message"`
+	LocalAddr string `json:"local_addr,omitempty"`
+	Server    string `json:"server,omitempty"`
+	Event     string `json:"event,omitempty"`
+}
+
+func structuredLog(level, message string, fields map[string]interface{}) {
+	entry := LogEntry{
+		Timestamp: time.Now().Format(time.RFC3339),
+		Level:     level,
+		Message:   message,
+	}
+
+	if localAddr, ok := fields["local_addr"].(string); ok {
+		entry.LocalAddr = localAddr
+	}
+	if server, ok := fields["server"].(string); ok {
+		entry.Server = server
+	}
+	if event, ok := fields["event"].(string); ok {
+		entry.Event = event
+	}
+
+	if jsonData, err := json.Marshal(entry); err == nil {
+		fmt.Println(string(jsonData))
+	} else {
+		log.Printf("[%s] %s", level, message)
+	}
+}
+
 func handleLocalConnection(localConn net.Conn, serverAddr string, apiKey string) {
 	defer localConn.Close()
 
 	// Connect to server for this connection
 	serverConn, err := tls.Dial("tcp", serverAddr, &tls.Config{InsecureSkipVerify: true})
 	if err != nil {
-		log.Println("Failed to connect to server:", err)
+		structuredLog("ERROR", "Failed to connect to server", map[string]interface{}{
+			"local_addr": localConn.RemoteAddr().String(),
+			"server":     serverAddr,
+			"event":      "connection_failed",
+			"error":      err.Error(),
+		})
 		return
 	}
 	defer serverConn.Close()
 
 	// Send API key for authentication
 	if _, err := fmt.Fprintf(serverConn, "%s\n", apiKey); err != nil {
-		log.Println("Failed to send API key:", err)
+		structuredLog("ERROR", "Failed to send API key", map[string]interface{}{
+			"local_addr": localConn.RemoteAddr().String(),
+			"server":     serverAddr,
+			"event":      "auth_failed",
+			"error":      err.Error(),
+		})
 		return
 	}
 
-	fmt.Println("Tunneling connection from", localConn.RemoteAddr())
+	structuredLog("INFO", "Starting tunnel", map[string]interface{}{
+		"local_addr": localConn.RemoteAddr().String(),
+		"server":     serverAddr,
+		"event":      "tunnel_started",
+	})
 
 	// Forward data in both directions
 	go io.Copy(serverConn, localConn)
